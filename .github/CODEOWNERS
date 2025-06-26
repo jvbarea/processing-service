@@ -1,0 +1,5 @@
+# Todas as alterações no repo precisam de aprovação minha
+*    @jvbarea
+
+# Além disso, qualquer mudança nos workflows exige que eu aprove
+.github/workflows/*    @jvbarea
