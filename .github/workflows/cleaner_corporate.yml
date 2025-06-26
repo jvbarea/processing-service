@@ -6,7 +6,13 @@ on:
 
 jobs:
   run-cleaner-corp:
+    name: Executar Cleaner Corporate
     runs-on: ubuntu-latest
+
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+  
     steps:
       - name: Checkout do código
         uses: actions/checkout@v4
@@ -24,6 +30,4 @@ jobs:
 
       - name: Run corporate cleaner
         run: python -m src.preprocessors.cleaner_corporate --batch-size 200 --once
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
