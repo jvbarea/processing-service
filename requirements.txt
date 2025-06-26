@@ -1,0 +1,6 @@
+python-dotenv
+pydantic
+pydantic-settings
+supabase
+pandas
+pyarrow
