@@ -29,5 +29,5 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run corporate cleaner
-        run: python -m src.preprocessors.cleaner_corporate --batch-size 200 --once
+        run: python -m src.preprocessors.cleaner --batch-size 200 --once
 
