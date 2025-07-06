@@ -4,3 +4,4 @@ pydantic-settings
 supabase
 pandas
 pyarrow
+openai
