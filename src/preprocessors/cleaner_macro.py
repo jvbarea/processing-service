@@ -4,8 +4,9 @@ import argparse
 import logging
 import sys
 import re
-from src.config import supabase  # supabase client configured in src/config.py
-
+from src.config import supabase, get_last_run_time, set_last_run_time  # import watermark helpers
+from dateutil.parser import isoparse  # para parsing robusto
+from datetime import datetime
 
 def setup_logging(debug: bool = False):
     """Configura logging com nível DEBUG se solicitado."""
@@ -35,25 +36,29 @@ def clean_text(text: str) -> str:
 def run_cleaner(batch_size: int, debug: bool = False) -> int:
     """
     Busca até `batch_size` registros em raw_news_macro via Supabase,
-    limpa e insere (upsert) em cleaned_news_macro.
+    limpa e insere (upsert) em cleaned_news_macro usando watermark de published_at.
     Retorna número de itens processados.
     """
-    # 1) Selecionar registros não processados
+    # watermark filter
+    # last_run = get_last_run_time("cleaner_macro")
+    raw_last = get_last_run_time("cleaner_macro")
+    last_run = raw_last if isinstance(raw_last, datetime) else isoparse(raw_last) 
     resp = (
         supabase.table("raw_news_macro")
                 .select("guid, published_at, title, summary")
+                # .gte("published_at", last_run)
+                .gt("published_at", last_run)
                 .order("published_at", desc=False)
                 .limit(batch_size)
                 .execute()
     )
     rows = resp.data or []
     if debug:
-        logging.debug(f"Fetched {len(rows)} rows: {rows}")
+        logging.debug(f"Fetched {len(rows)} rows since {last_run}: {rows}")
     if not rows:
-        logging.info("Nenhum raw_news_macro para processar.")
+        logging.info("Nenhum raw_news_macro novo para processar.")
         return 0
 
-    # 2) Preparar batch limpo
     cleaned_batch = []
     for r in rows:
         cleaned_batch.append({
@@ -63,13 +68,11 @@ def run_cleaner(batch_size: int, debug: bool = False) -> int:
             "body_clean": clean_text(r.get("summary", ""))
         })
 
-    # 3) Upsert em cleaned_news_macro
     insert_resp = (
         supabase.table("cleaned_news_macro")
                 .upsert(cleaned_batch, on_conflict="guid")
                 .execute()
     )
-    # Checagem de erro resistente a atributos faltantes
     err = getattr(insert_resp, 'error', None)
     status = getattr(insert_resp, 'status_code', None)
     if err or (status and status >= 300):
@@ -77,6 +80,11 @@ def run_cleaner(batch_size: int, debug: bool = False) -> int:
         sys.exit(1)
 
     processed = len(cleaned_batch)
+    # update watermark
+    max_ts_str = max(r["published_at"] for r in rows)
+    max_ts: datetime = isoparse(max_ts_str)
+    set_last_run_time("cleaner_macro", max_ts)
+
     logging.info(f"Processed {processed} items")
     return processed
 
@@ -109,6 +117,7 @@ def main():
 
     try:
         total = 0
+        logging.info("Iniciando cleaner_macro")
         if args.once:
             total = run_cleaner(args.batch_size, args.debug)
         else:
@@ -118,11 +127,11 @@ def main():
                 if count < args.batch_size:
                     break
         logging.info(f"batch_processed={total}")
+        logging.info("Cleaner_macro finalizado com sucesso")
         sys.exit(0)
     except Exception:
         logging.exception("Erro na execução do cleaner_macro")
         sys.exit(1)
-
-
+        
 if __name__ == "__main__":
     main()
