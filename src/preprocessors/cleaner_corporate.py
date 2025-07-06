@@ -1,10 +1,10 @@
-#!/usr/bin/env python3
-
 import argparse
 import logging
 import sys
 import re
-from src.config import supabase  # supabase client configured in src/config.py
+from datetime import datetime
+from dateutil.parser import isoparse
+from src.config import supabase, get_last_run_time, set_last_run_time  # import watermark helpers
 
 
 def setup_logging(debug: bool = False):
@@ -35,28 +35,27 @@ def clean_text(text: str) -> str:
 def run_cleaner(batch_size: int, debug: bool = False) -> int:
     """
     Busca até `batch_size` registros em raw_news via Supabase,
-    limpa e insere em cleaned_news com upsert.
+    limpa e insere em cleaned_news com upsert usando watermark.
     Retorna número de itens processados.
     """
-    # Seleção de registros não processados
-    response = (
+    last_run: datetime = get_last_run_time("cleaner_corporate")
+    resp = (
         supabase.table("raw_news")
                 .select(
                     "guid, feed_id, title, summary, tickers, cnpjs, published_at"
                 )
+                .gt("published_at", last_run)         # pega só timestamps maiores que o watermark
                 .order("published_at", desc=False)
                 .limit(batch_size)
                 .execute()
     )
-
-    rows = response.data or []
+    rows = resp.data or []
     if debug:
-        logging.debug(f"Fetched {len(rows)} rows: {rows}")
+        logging.debug(f"Fetched {len(rows)} rows since {last_run}: {rows}")
     if not rows:
-        logging.info("Nenhum raw_news para processar.")
+        logging.info("Nenhum raw_news novo para processar.")
         return 0
 
-    # Preparar batch limpo conforme schema
     cleaned_batch = []
     for r in rows:
         cleaned_batch.append({
@@ -69,14 +68,11 @@ def run_cleaner(batch_size: int, debug: bool = False) -> int:
             "cnpjs": r.get("cnpjs", [])
         })
 
-    # Upsert para cleaned_news (chave primária = guid)
     insert_resp = (
         supabase.table("cleaned_news")
                 .upsert(cleaned_batch, on_conflict="guid")
                 .execute()
     )
-
-    # Verificação robusta de erro
     err = getattr(insert_resp, 'error', None)
     status = getattr(insert_resp, 'status_code', None)
     if err or (status and status >= 300):
@@ -84,6 +80,10 @@ def run_cleaner(batch_size: int, debug: bool = False) -> int:
         sys.exit(1)
 
     processed = len(cleaned_batch)
+    max_ts_str = max(r["published_at"] for r in rows)
+    max_ts: datetime = isoparse(max_ts_str)
+    set_last_run_time("cleaner_corporate", max_ts)
+
     logging.info(f"Processed {processed} items")
     return processed
 
@@ -101,7 +101,7 @@ def main():
     parser.add_argument(
         "--once",
         action="store_true",
-        help="Roda apenas um lote de até --batch-size e encerra"
+        help="Roda apenas um lote e encerra"
     )
     parser.add_argument(
         "--debug",
@@ -129,7 +129,6 @@ def main():
     except Exception:
         logging.exception("Erro na execução do cleaner_corporate")
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()
