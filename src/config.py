@@ -2,7 +2,8 @@ from datetime import datetime, timezone
 from pydantic import AnyUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from supabase import create_client, Client
-
+from dateutil import parser as dtparse
+from typing import Any
 
 class Settings(BaseSettings):
     SUPABASE_URL: str | None = None
@@ -24,31 +25,27 @@ supabase: Client = create_client(
     str(settings.SUPABASE_KEY)
 )
 
-
 def get_last_run_time(job: str) -> datetime:
-    """
-    Retorna o timestamp do último run para o job,
-    ou epoch (1970-01-01T00:00:00Z) se não houver ainda registro.
-    """
-    resp = (
+    resp: Any = (
         supabase
         .table("process_metadata")
         .select("last_run")
         .eq("job", job)
-        .maybe_single()      # NÃO lança erro se não achar linha
+        .maybe_single()
         .execute()
     )
-    # extrai com segurança, usa {} caso não exista
     record = getattr(resp, "data", None) or {}
     last = record.get("last_run")
     if last:
-        # Supabase já devolve ISO string com timezone
-        return datetime.fromisoformat(last)
-
-    # primeira vez: retorna epoch UTC
+        try:
+            # tenta ISO puro
+            return datetime.fromisoformat(last)
+        except ValueError:
+            # fallback robusto
+            return dtparse.parse(last)
+    # sem registro: epoch UTC
     return datetime.fromtimestamp(0, tz=timezone.utc)
-
-
+    
 def set_last_run_time(job: str, ts: datetime):
     """
     Upsert do last_run para o job na tabela process_metadata.
