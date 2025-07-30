@@ -29,4 +29,4 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run macro cleaner
-        run: python -m src.preprocessors.cleaner_macro --batch-size 200 --once
+        run: python -m src.preprocessors.cleaner_macro --batch-size 500 --once
